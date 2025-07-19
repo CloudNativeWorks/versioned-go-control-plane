@@ -100,11 +100,8 @@ jobs:
           fi
           echo "main_release_exists=false" >> $GITHUB_OUTPUT
           
-          # Extract ratelimit version from original go-control-plane's go.mod
-          RATELIMIT_VERSION=$(grep "github.com/envoyproxy/go-control-plane/ratelimit" go-control-plane/go.mod | awk '{print $2}' | tr -d '"' | tr -d '\n' | sed 's/=>//')
-          if [ -z "$RATELIMIT_VERSION" ]; then
-            RATELIMIT_VERSION="v0.1.0"
-          fi
+          # Set ratelimit version to match envoy version for versioned releases
+          RATELIMIT_VERSION="v${ENVOY_VERSION}"
           echo "RATELIMIT_VERSION=${RATELIMIT_VERSION}" >> $GITHUB_ENV
           
           # Prepare temporary directories
@@ -129,10 +126,10 @@ jobs:
             echo "envoy_exists=false" >> $GITHUB_OUTPUT
           fi
           
-          # Check and download Ratelimit release
-          if gh release view "ratelimit/${RATELIMIT_VERSION}" --repo CloudNativeWorks/versioned-go-control-plane &>/dev/null; then
-            echo "Found existing Ratelimit release, downloading..."
-            gh release download "ratelimit/${RATELIMIT_VERSION}" --repo CloudNativeWorks/versioned-go-control-plane --dir temp/ratelimit
+          # Check and download Ratelimit release (now versioned with envoy)
+          if gh release view "ratelimit/v${ENVOY_VERSION}" --repo CloudNativeWorks/versioned-go-control-plane &>/dev/null; then
+            echo "Found existing Ratelimit release for envoy ${ENVOY_VERSION}, downloading..."
+            gh release download "ratelimit/v${ENVOY_VERSION}" --repo CloudNativeWorks/versioned-go-control-plane --dir temp/ratelimit
             cd temp/ratelimit
             tar xzf *.tar.gz
             if [ -d "ratelimit" ]; then
@@ -179,11 +176,9 @@ jobs:
         run: |
           cd go-control-plane
           
-          # Re-check Ratelimit version
-          RATELIMIT_VERSION=$(grep "github.com/envoyproxy/go-control-plane/ratelimit" go.mod | awk '{print $2}' | tr -d '"' | tr -d '\n' | sed 's/=>//')
-          if [ -z "$RATELIMIT_VERSION" ]; then
-            RATELIMIT_VERSION="v0.1.0"
-          fi
+          # Set ratelimit version to match envoy version
+          ENVOY_VERSION=$(echo ${{ github.event.inputs.envoy_version }} | sed 's/^v//')
+          RATELIMIT_VERSION="v${ENVOY_VERSION}"
           
           # Remove any existing envoy/contrib directories before generation
           rm -rf envoy contrib
@@ -195,7 +190,7 @@ jobs:
           # Run protos generation
           ENVOY_SRC_DIR="../envoy-src" \
           ENVOY_VERSION="${{ github.event.inputs.envoy_version }}" \
-          RATELIMIT_VERSION="${{ env.RATELIMIT_VERSION }}" \
+          RATELIMIT_VERSION="v${ENVOY_VERSION}" \
           ./sync_protos.sh
           
           # Strip the 'v' prefix from versions
@@ -246,7 +241,7 @@ jobs:
           # Strip the 'v' prefix from input versions
           CONTROL_PLANE_VERSION=$(echo ${{ github.event.inputs.control_plane_version }} | sed 's/^v//')
           ENVOY_VERSION=$(echo ${{ github.event.inputs.envoy_version }} | sed 's/^v//')
-          RATELIMIT_VERSION="${{ env.RATELIMIT_VERSION }}"
+          RATELIMIT_VERSION="v${ENVOY_VERSION}"
           
           TAG_VERSION="${CONTROL_PLANE_VERSION}-envoy${ENVOY_VERSION}"
           BRANCH_NAME="release/${CONTROL_PLANE_VERSION}-envoy${ENVOY_VERSION}"
@@ -272,7 +267,7 @@ jobs:
           # Create tags for each module
           git tag "v${TAG_VERSION}"                 # main module
           git tag "envoy/v${ENVOY_VERSION}"         # envoy module
-          git tag "ratelimit/${RATELIMIT_VERSION}"  # ratelimit module
+          git tag "ratelimit/v${ENVOY_VERSION}"     # ratelimit module (now versioned with envoy)
           if [ -d "contrib" ]; then
             git tag "contrib/v${ENVOY_VERSION}"     # contrib module
           fi
@@ -281,7 +276,7 @@ jobs:
           git push -u origin "${BRANCH_NAME}" --force
           git push origin "v${TAG_VERSION}" --force
           git push origin "envoy/v${ENVOY_VERSION}" --force
-          git push origin "ratelimit/${RATELIMIT_VERSION}" --force
+          git push origin "ratelimit/v${ENVOY_VERSION}" --force
           if [ -d "contrib" ]; then
             git push origin "contrib/v${ENVOY_VERSION}" --force
           fi
@@ -299,7 +294,7 @@ jobs:
           
           CONTROL_PLANE_VERSION=$(echo ${{ github.event.inputs.control_plane_version }} | sed 's/^v//')
           ENVOY_VERSION=$(echo ${{ github.event.inputs.envoy_version }} | sed 's/^v//')
-          RATELIMIT_VERSION="${{ env.RATELIMIT_VERSION }}"
+          RATELIMIT_VERSION="v${ENVOY_VERSION}"
           TAG_VERSION="${CONTROL_PLANE_VERSION}-envoy${ENVOY_VERSION}"
           
           # Envoy release (if missing)
@@ -314,14 +309,14 @@ jobs:
             rm envoy.tar.gz
           fi
           
-          # Ratelimit release (if missing)
-          if ! gh release view "ratelimit/${RATELIMIT_VERSION}" --repo CloudNativeWorks/versioned-go-control-plane &>/dev/null; then
+          # Ratelimit release (if missing) - now versioned with envoy
+          if [ "${{ steps.check_releases.outputs.ratelimit_exists }}" != "true" ]; then
             tar -czf ratelimit.tar.gz ratelimit/
             gh release create \
-              "ratelimit/${RATELIMIT_VERSION}" \
+              "ratelimit/v${ENVOY_VERSION}" \
               ratelimit.tar.gz \
-              --title "Ratelimit Module ${RATELIMIT_VERSION}" \
-              --notes "Ratelimit module for versioned-go-control-plane" \
+              --title "Ratelimit Module v${ENVOY_VERSION}" \
+              --notes "Ratelimit module for versioned-go-control-plane with Envoy ${ENVOY_VERSION}" \
               --repo CloudNativeWorks/versioned-go-control-plane
             rm ratelimit.tar.gz
           fi
