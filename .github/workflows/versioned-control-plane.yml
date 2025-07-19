@@ -4,12 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       control_plane_version:
-        description: "Go Control Plane version to fork (e.g., v0.13.2)"
+        description: "Go Control Plane version to fork (e.g., v0.13.4)"
+        default: "v0.13.4"
         required: true
         type: string
       envoy_version:
-        description: "Envoy version to use for protos (e.g., v1.32.3)"
+        description: "Envoy version to use for protos (e.g., v1.34.3)"
         required: true
+        default: "v1.34.2"
         type: string
 
 permissions:
