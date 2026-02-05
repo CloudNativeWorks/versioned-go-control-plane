@@ -170,30 +170,44 @@ jobs:
           rm -rf temp
 
       # --------------------------------------------------
-      # 8) Generate Envoy protos if the Envoy release
-      #    does not exist in the fork
+      # 8) Build Envoy Go protos using Envoy's Docker image
       # --------------------------------------------------
-      - name: Generate Envoy Protos
+      - name: Build Envoy Go Protos
+        if: steps.check_releases.outputs.envoy_exists == 'false'
+        run: |
+          cd envoy-src
+
+          # Use Envoy's Docker image to build Go protos
+          # This ensures all dependencies (LLVM toolchain, etc.) are available
+          ./ci/run_envoy_docker.sh './ci/do_ci.sh api.go'
+
+      # --------------------------------------------------
+      # 9) Sync generated protos to go-control-plane
+      # --------------------------------------------------
+      - name: Sync Envoy Protos
         if: steps.check_releases.outputs.envoy_exists == 'false'
         run: |
           cd go-control-plane
-          
-          # Set ratelimit version to match envoy version
+
+          # Set versions
           ENVOY_VERSION=$(echo ${{ github.event.inputs.envoy_version }} | sed 's/^v//')
           RATELIMIT_VERSION="v${ENVOY_VERSION}"
-          
-          # Remove any existing envoy/contrib directories before generation
+          IMPORT_BASE="github.com/CloudNativeWorks/versioned-go-control-plane"
+
+          # Remove any existing envoy/contrib directories before sync
           rm -rf envoy contrib
-          
-          # Copy the sync_protos.sh script from the current repo
-          cp ../current-repo/sync_protos.sh .
-          chmod +x sync_protos.sh
-          
-          # Run protos generation
-          ENVOY_SRC_DIR="../envoy-src" \
-          ENVOY_VERSION="${{ github.event.inputs.envoy_version }}" \
-          RATELIMIT_VERSION="v${ENVOY_VERSION}" \
-          ./sync_protos.sh
+          mkdir -p envoy contrib
+
+          # Copy generated proto files from Envoy build output
+          for src in envoy contrib; do
+            if [ -d "../envoy-src/build_go/${src}" ]; then
+              echo "Copying ../envoy-src/build_go/${src}/* -> ${src}"
+              cp -r "../envoy-src/build_go/${src}"/* "${src}/"
+
+              # Update import paths in all .go files
+              find "${src}" -type f -name "*.go" -exec sed -i "s|github.com/envoyproxy/go-control-plane|${IMPORT_BASE}|g" {} \;
+            fi
+          done
           
           # Strip the 'v' prefix from versions
           CONTROL_PLANE_VERSION=$(echo ${{ github.event.inputs.control_plane_version }} | sed 's/^v//')
@@ -227,8 +241,8 @@ jobs:
           fi
 
       # --------------------------------------------------
-      # 9) Push changes and create tags if the main
-      #    release does not exist
+      # 10) Push changes and create tags if the main
+      #     release does not exist
       # --------------------------------------------------
       - name: Push Changes and Create Tags
         if: steps.check_releases.outputs.main_release_exists == 'false'
@@ -284,7 +298,7 @@ jobs:
           fi
 
       # --------------------------------------------------
-      # 10) Create GitHub releases for each module
+      # 11) Create GitHub releases for each module
       #     if the main release doesn't exist
       # --------------------------------------------------
       - name: Create Releases
