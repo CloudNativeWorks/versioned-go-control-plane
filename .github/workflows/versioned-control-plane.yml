@@ -170,6 +170,39 @@ jobs:
           rm -rf temp
 
       # --------------------------------------------------
+      # 7.5) Rewrite `option go_package` in every Envoy .proto
+      #
+      # Why this exists:
+      #   protoc-gen-go v1.36+ emits the FileDescriptorProto raw bytes as a
+      #   Go *string* literal containing the go_package value. The post-build
+      #   sed in step 9 used to silently rewrite that string from
+      #   `github.com/envoyproxy/go-control-plane` to
+      #   `github.com/CloudNativeWorks/versioned-go-control-plane` — but it
+      #   does not adjust the proto wire-format length prefix that precedes
+      #   the string. The descriptor parser then walks past the buffer and
+      #   panics at runtime with `slice bounds out of range [-4:]`
+      #   (filedesc/desc_init.go:174).
+      #
+      #   Older protoc-gen-go (≤ v1.30) wrote the descriptor as a []byte
+      #   literal, where the import path is not present as text, so sed
+      #   had no effect on the descriptor and everything happened to work.
+      #
+      #   The clean fix is to update the source-of-truth — the .proto's
+      #   `option go_package` — *before* protoc runs. The generated
+      #   descriptors then bake in the correct path with a matching length
+      #   prefix, and step 9's sed becomes a no-op for descriptors (it
+      #   only touches comments / non-descriptor strings).
+      # --------------------------------------------------
+      - name: Patch go_package in Envoy proto sources
+        if: steps.check_releases.outputs.envoy_exists == 'false'
+        run: |
+          cd envoy-src
+          find api -type f -name "*.proto" -exec sed -i \
+            's|github.com/envoyproxy/go-control-plane|github.com/CloudNativeWorks/versioned-go-control-plane|g' \
+            {} \;
+          echo "Patched go_package in $(find api -type f -name '*.proto' | wc -l) .proto files"
+
+      # --------------------------------------------------
       # 8) Build Envoy Go protos using Envoy's Docker image
       # --------------------------------------------------
       - name: Build Envoy Go Protos
@@ -204,7 +237,14 @@ jobs:
               echo "Copying ../envoy-src/build_go/${src}/* -> ${src}"
               cp -r "../envoy-src/build_go/${src}"/* "${src}/"
 
-              # Update import paths in all .go files
+              # Defensive sed: rewrite any residual references in generated .go
+              # files (comments, helper code). The .proto-level patch in step 7.5
+              # already produced descriptors and imports with the correct path,
+              # so this should be a no-op for raw descriptors and only touches
+              # incidental occurrences. DO NOT rely on this step to rename the
+              # module — descriptors generated with protoc-gen-go ≥ v1.36 embed
+              # their go_package as a Go string literal whose proto length
+              # prefix this sed cannot adjust.
               find "${src}" -type f -name "*.go" -exec sed -i "s|github.com/envoyproxy/go-control-plane|${IMPORT_BASE}|g" {} \;
             fi
           done
